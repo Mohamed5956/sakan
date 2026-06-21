@@ -1,19 +1,19 @@
 {
-    "php": {
-        "extensions": [
-            "intl",
-            "zip",
-            "exif",
-            "gd",
-            "bcmath",
-            "ctype",
-            "curl",
-            "mbstring",
-            "xml",
-            "tokenizer",
-            "fileinfo",
-            "pdo",
-            "pdo_mysql"
-        ]
-    }
+    "$schema": "https://schema.railpack.com",
+    "phpExtensions": [
+        "intl",
+        "zip",
+        "exif",
+        "gd",
+        "bcmath",
+        "ctype",
+        "curl",
+        "mbstring",
+        "xml",
+        "tokenizer",
+        "fileinfo",
+        "pdo",
+        "pdo_mysql"
+    ]
 }
+
