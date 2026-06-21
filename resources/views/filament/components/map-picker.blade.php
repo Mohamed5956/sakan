@@ -1,8 +1,6 @@
 @php
-    $lat = $getLat();
-    $lng = $getLng();
-    $latField = $getLatField();
-    $lngField = $getLngField();
+    $lat = $getRecord()?->latitude ?? '';
+    $lng = $getRecord()?->longitude ?? '';
 @endphp
 
 <div x-data="mapPicker('{{ $lat }}', '{{ $lng }}')" class="w-full">
@@ -24,18 +22,18 @@
 
         <span x-show="lat && lng" class="text-xs text-green-600 font-medium">
             ✓ تم تحديد الموقع
-            (<span x-text="parseFloat(lat).toFixed(5)"></span>,
-             <span x-text="parseFloat(lng).toFixed(5)"></span>)
+            (<span x-text="lat ? parseFloat(lat).toFixed(5) : ''"></span>,
+             <span x-text="lng ? parseFloat(lng).toFixed(5) : ''"></span>)
         </span>
     </div>
 
     {{-- الخريطة --}}
-    <div x-show="showMap" x-transition class="rounded-xl overflow-hidden border-2 border-navy mb-3" style="height: 400px;">
+    <div x-show="showMap" x-transition class="rounded-xl overflow-hidden border-2 mb-3" style="height: 400px; border-color: #1e3a5f;">
         <div id="map-picker-{{ $getId() }}" style="height: 100%; width: 100%;"></div>
     </div>
 
     <p x-show="showMap" class="text-xs text-gray-500 mb-2">
-        💡 اضغط على أي مكان في الخريطة لتحديد الموقع بدقة
+        💡 اضغط على أي مكان في الخريطة لتحديد الموقع بدقة — أو اسحب الـ marker
     </p>
 
 </div>
@@ -52,34 +50,52 @@
                 lng: initLng || '',
                 map: null,
                 marker: null,
+                pollInterval: null,
 
                 toggleMap() {
                     this.showMap = !this.showMap;
                     if (this.showMap) {
                         this.$nextTick(() => this.initMap());
+                    } else {
+                        if (this.pollInterval) {
+                            clearInterval(this.pollInterval);
+                            this.pollInterval = null;
+                        }
                     }
                 },
 
                 initMap() {
+                    // لو الخريطة موجودة بالفعل — فقط حدث الحجم
                     if (this.map) {
                         this.map.invalidateSize();
+                        this.syncFromFields();
                         return;
                     }
 
-                    const defaultLat = this.lat || 26.5590;
-                    const defaultLng = this.lng || 31.6957;
+                    // ابدأ بقراءة الـ fields الحالية لو فارغ
+                    const latInput = document.querySelector('input[id*="latitude"]');
+                    const lngInput = document.querySelector('input[id*="longitude"]');
 
-                    this.map = L.map('map-picker-{{ $getId() }}').setView([defaultLat, defaultLng], this.lat ? 15 : 7);
+                    if (!this.lat && latInput?.value) this.lat = latInput.value;
+                    if (!this.lng && lngInput?.value) this.lng = lngInput.value;
+
+                    const defaultLat = parseFloat(this.lat) || 26.8206;
+                    const defaultLng = parseFloat(this.lng) || 30.8025;
+                    const defaultZoom = this.lat ? 15 : 6;
+
+                    this.map = L.map('map-picker-{{ $getId() }}').setView([defaultLat, defaultLng], defaultZoom);
 
                     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        attribution: '© OpenStreetMap',
+                        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
                         maxZoom: 19,
                     }).addTo(this.map);
 
+                    // لو في موقع محفوظ حط marker
                     if (this.lat && this.lng) {
-                        this.addMarker(this.lat, this.lng);
+                        this.addMarker(parseFloat(this.lat), parseFloat(this.lng));
                     }
 
+                    // عند الضغط على الخريطة
                     this.map.on('click', (e) => {
                         const { lat, lng } = e.latlng;
                         this.lat = lat.toFixed(8);
@@ -88,9 +104,39 @@
                         this.updateFilamentFields();
                     });
 
+                    // Polling — راقب الـ fields كل ثانية (للـ geocode button)
+                    this.pollInterval = setInterval(() => {
+                        const currentLat = document.querySelector('input[id*="latitude"]')?.value;
+                        const currentLng = document.querySelector('input[id*="longitude"]')?.value;
+
+                        if (currentLat && currentLng &&
+                            (currentLat !== this.lat || currentLng !== this.lng)) {
+                            this.lat = currentLat;
+                            this.lng = currentLng;
+                            if (this.map) {
+                                this.map.setView([parseFloat(currentLat), parseFloat(currentLng)], 15);
+                                this.addMarker(parseFloat(currentLat), parseFloat(currentLng));
+                            }
+                        }
+                    }, 1000);
+
                     document.addEventListener('livewire:navigated', () => {
                         if (this.map) this.map.invalidateSize();
                     });
+                },
+
+                syncFromFields() {
+                    const latInput = document.querySelector('input[id*="latitude"]');
+                    const lngInput = document.querySelector('input[id*="longitude"]');
+
+                    if (latInput?.value && lngInput?.value) {
+                        this.lat = latInput.value;
+                        this.lng = lngInput.value;
+                        if (this.map) {
+                            this.map.setView([parseFloat(this.lat), parseFloat(this.lng)], 15);
+                            this.addMarker(parseFloat(this.lat), parseFloat(this.lng));
+                        }
+                    }
                 },
 
                 addMarker(lat, lng) {
@@ -99,15 +145,22 @@
                     }
 
                     const icon = L.divIcon({
-                        html: `<div style="background:#1e3a5f;width:20px;height:20px;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>`,
-                        iconSize: [20, 20],
-                        iconAnchor: [10, 10],
+                        html: `<div style="
+                    background: #1e3a5f;
+                    width: 22px;
+                    height: 22px;
+                    border-radius: 50%;
+                    border: 3px solid white;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+                "></div>`,
+                        iconSize: [22, 22],
+                        iconAnchor: [11, 11],
                         className: '',
                     });
 
                     this.marker = L.marker([lat, lng], { icon, draggable: true }).addTo(this.map);
 
-                    // السماح بسحب الـ marker
+                    // سحب الـ marker
                     this.marker.on('dragend', (e) => {
                         const pos = e.target.getLatLng();
                         this.lat = pos.lat.toFixed(8);
@@ -131,7 +184,6 @@
                         lngInput.dispatchEvent(new Event('input',  { bubbles: true }));
                         lngInput.dispatchEvent(new Event('change', { bubbles: true }));
                     }
-
                 },
             }
         }
