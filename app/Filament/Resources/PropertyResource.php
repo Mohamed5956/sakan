@@ -14,6 +14,8 @@ use Filament\Forms\Components\Grid;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Filament\Forms\Components\Actions\Action;
+use App\Filament\Forms\Components\MapPicker;
+
 class PropertyResource extends Resource
 {
     protected static ?string $model = Property::class;
@@ -118,43 +120,64 @@ class PropertyResource extends Resource
                         ->required()
                         ->maxLength(255)
                         ->columnSpanFull()
-                        ->helperText('أدخل العنوان الكامل ثم اضغط "تحديد الموقع"')
+                        ->helperText('💡 لتحديد الموقع تلقائياً: تأكد من كتابة اسم المدينة في حقل "المدينة" أعلاه أولاً')
                         ->suffixAction(
                             Action::make('geocode')
                                 ->label('تحديد الموقع')
                                 ->icon('heroicon-o-map-pin')
                                 ->action(function (Forms\Get $get, Forms\Set $set) {
                                     $address = $get('address');
+                                    $city    = $get('city');
 
-                                    if (!$address) {
+                                    if (!$address && !$city) {
                                         \Filament\Notifications\Notification::make()
-                                            ->title('من فضلك أدخل العنوان أولاً')
+                                            ->title('من فضلك أدخل العنوان أو المدينة أولاً')
                                             ->warning()
                                             ->send();
                                         return;
                                     }
 
-                                    $response = Http::get('https://maps.googleapis.com/maps/api/geocode/json', [
-                                        'address'  => $address,
-                                        'key'      => config('services.google_maps.key'),
-                                        'language' => 'ar',
-                                    ]);
+                                    $queries = [
+                                        ($city ? $address . '، ' . $city : $address) . '، مصر',
+                                        $city ? $city . '، مصر' : $address . '، مصر',
+                                    ];
 
-                                    $data = $response->json();
+                                    $found = false;
 
-                                    if (($data['status'] ?? '') === 'OK') {
-                                        $location = $data['results'][0]['geometry']['location'];
-                                        $set('latitude',  $location['lat']);
-                                        $set('longitude', $location['lng']);
+                                    foreach ($queries as $query) {
+                                        $response = Http::withHeaders([
+                                            'User-Agent' => 'SakanApp/1.0 (contact@sakan.com)',
+                                        ])->get('https://nominatim.openstreetmap.org/search', [
+                                            'q'               => $query,
+                                            'format'          => 'json',
+                                            'limit'           => 1,
+                                            'accept-language' => 'ar',
+                                            'countrycodes'    => 'eg',
+                                        ]);
 
-                                        \Filament\Notifications\Notification::make()
-                                            ->title('تم تحديد الموقع بنجاح ✓')
-                                            ->success()
-                                            ->send();
-                                    } else {
+                                        $data = $response->json();
+
+                                        if (!empty($data) && isset($data[0]['lat'])) {
+                                            $set('latitude',  (float) $data[0]['lat']);
+                                            $set('longitude', (float) $data[0]['lon']);
+
+                                            \Filament\Notifications\Notification::make()
+                                                ->title('تم تحديد الموقع بنجاح ✓')
+                                                ->body('📍 ' . $data[0]['display_name'])
+                                                ->success()
+                                                ->send();
+
+                                            $found = true;
+                                            break;
+                                        }
+
+                                        sleep(1);
+                                    }
+
+                                    if (!$found) {
                                         \Filament\Notifications\Notification::make()
                                             ->title('لم يتم العثور على الموقع')
-                                            ->body('تحقق من العنوان وحاول مرة أخرى')
+                                            ->body('تأكد من كتابة اسم المدينة في حقل "المدينة" وحاول مرة أخرى')
                                             ->danger()
                                             ->send();
                                     }
@@ -175,6 +198,10 @@ class PropertyResource extends Resource
                             ->placeholder('يتم تعبئته تلقائياً'),
                     ]),
 
+                    MapPicker::make('map_picker')
+                        ->label('')
+                        ->dehydrated(false)
+                        ->columnSpanFull(),
                 ]),
 
             // ── تفاصيل العقار ──────────────────────────────
